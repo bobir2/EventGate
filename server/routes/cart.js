@@ -1,5 +1,5 @@
 const express = require('express');
-const { getAll, getOne, run, getDriver } = require('../config/db');
+const { getAll, getOne, run } = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -51,11 +51,7 @@ router.post('/', async (req, res) => {
     );
     if (inOtherCart) return res.status(400).json({ error: 'Місце в кошику іншого користувача' });
 
-    if (getDriver() === 'pg') {
-      await run('INSERT INTO cart_items (user_id, seat_id) VALUES (?,?) ON CONFLICT DO NOTHING', [req.user.id, seat_id]);
-    } else {
-      await run('INSERT OR IGNORE INTO cart_items (user_id, seat_id) VALUES (?,?)', [req.user.id, seat_id]);
-    }
+    await run('INSERT INTO cart_items (user_id, seat_id) VALUES (?,?) ON CONFLICT DO NOTHING', [req.user.id, seat_id]);
     await run("UPDATE seats SET status = 'reserved' WHERE id = ? AND status = 'free'", [seat_id]);
     res.status(201).json({ ok: true, message: 'Додано в кошик' });
   } catch (e) {

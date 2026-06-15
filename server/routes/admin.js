@@ -1,5 +1,5 @@
 const express = require('express');
-const { getAll, getOne, run } = require('../config/db');
+const { getAll, getOne, run, insertId } = require('../config/db');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
@@ -9,11 +9,11 @@ router.use(requireAuth, requireAdmin);
 router.get('/stats', async (req, res) => {
   try {
     const users = await getOne('SELECT COUNT(*) as count FROM users');
-    const events = await getOne('SELECT COUNT(*) as count FROM events WHERE is_archived = 0 OR is_archived IS NULL');
+    const events = await getOne('SELECT COUNT(*) as count FROM events WHERE NOT COALESCE(is_archived, false)');
     const orders = await getOne('SELECT COUNT(*) as count FROM orders');
     const revenue = await getOne('SELECT COALESCE(SUM(total_price),0) as total FROM orders');
     const pending = await getOne(`SELECT COUNT(*) as count FROM listings WHERE status = 'pending'`);
-    const unread = await getOne('SELECT COUNT(*) as count FROM admin_notifications WHERE is_read = 0');
+    const unread = await getOne('SELECT COUNT(*) as count FROM admin_notifications WHERE NOT COALESCE(is_read, false)');
     res.json({
       users: Number(users.count),
       events: Number(events.count),
@@ -124,34 +124,21 @@ router.get('/events', async (req, res) => {
 router.post('/events', async (req, res) => {
   try {
     const { title, description, event_type, venue, event_date, image_url, sectors } = req.body;
-    const { getDriver } = require('../config/db');
-    let eventId;
 
-    const res2 = await run(
+    const eventId = await insertId(
       `INSERT INTO events (title, description, event_type, venue, event_date, image_url) VALUES (?,?,?,?,?,?)`,
       [title, description, event_type, venue, event_date, image_url || '']
     );
-    eventId = getDriver() === 'pg' ? res2.rows?.[0]?.id : res2.lastInsertRowid;
-
-    if (getDriver() === 'pg' && !eventId) {
-      const ev = await getOne('SELECT id FROM events ORDER BY id DESC LIMIT 1');
-      eventId = ev?.id;
-    }
 
     const defaultSectors = sectors || [
       { name: 'Партер', price: 500, rows_count: 4, seats_per_row: 8 },
     ];
 
     for (const sec of defaultSectors) {
-      const r = await run(
+      const sectorId = await insertId(
         `INSERT INTO sectors (event_id, name, price, rows_count, seats_per_row) VALUES (?,?,?,?,?)`,
         [eventId, sec.name, sec.price, sec.rows_count, sec.seats_per_row]
       );
-      let sectorId = getDriver() === 'pg' ? r.rows?.[0]?.id : r.lastInsertRowid;
-      if (getDriver() === 'pg' && !sectorId) {
-        const s = await getOne('SELECT id FROM sectors WHERE event_id = ? ORDER BY id DESC LIMIT 1', [eventId]);
-        sectorId = s?.id;
-      }
       for (let row = 1; row <= sec.rows_count; row++) {
         for (let seat = 1; seat <= sec.seats_per_row; seat++) {
           await run('INSERT INTO seats (sector_id, row_num, seat_num) VALUES (?,?,?)', [sectorId, row, seat]);

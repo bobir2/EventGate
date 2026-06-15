@@ -1,10 +1,22 @@
 # EventGate
 
-Веб-застосунок для продажу квитків на події. Стек: Node.js, Express, SQLite/PostgreSQL, HTML/CSS/JS.
+Веб-застосунок для продажу квитків на події. Стек: Node.js, Express, PostgreSQL, HTML/CSS/JS.
 
 ## Запуск
 
+1. PostgreSQL (локально або Docker):
+
 ```bash
+docker run -d --name eventgate-pg \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=eventgate \
+  -p 5432:5432 postgres:16
+```
+
+2. Налаштування:
+
+```bash
+cp .env.example .env
 npm install
 npm run db:init
 npm start
@@ -19,12 +31,8 @@ npm start
 | user@eventgate.local | user123 | користувач |
 | admin@eventgate.local | admin123 | адмін |
 
-## Структура
+## Деплой (Render)
 
-- `server/` — API та робота з БД
-- `public/` — клієнтська частина
-- `data/` — SQLite (локально)
-
-## Деплой
-
-Render або Railway: вказати `DATABASE_URL`, `JWT_SECRET`, команда старту `npm start`.
+- Build: `npm install && npm run db:init`
+- Start: `npm start`
+- Змінні: `DATABASE_URL`, `JWT_SECRET`, `NODE_ENV=production`

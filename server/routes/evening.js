@@ -11,7 +11,7 @@ router.get('/suggest', async (req, res) => {
     const events = await getAll(
       `SELECT e.*, MIN(s.price) as min_price FROM events e
        LEFT JOIN sectors s ON s.event_id = e.id
-       WHERE e.event_date LIKE ? AND (e.is_archived = 0 OR e.is_archived IS NULL)
+       WHERE e.event_date LIKE ? AND NOT COALESCE(e.is_archived, false)
        GROUP BY e.id ORDER BY e.event_date ASC`,
       [`${targetDate}%`]
     );

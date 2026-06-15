@@ -1,5 +1,5 @@
 const express = require('express');
-const { getAll, getOne, run, getDriver } = require('../config/db');
+const { getAll, getOne, run } = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
 const { notifyAdmin } = require('../utils/notify');
 
@@ -7,7 +7,7 @@ const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
-    const dateFilter = getDriver() === 'pg' ? "a.ends_at > NOW()" : "a.ends_at > datetime('now')";
+    const dateFilter = "a.ends_at > NOW()";
     const auctions = await getAll(
       `SELECT a.*, e.title as event_title, e.venue, st.row_num, st.seat_num, s.name as sector_name
        FROM auctions a

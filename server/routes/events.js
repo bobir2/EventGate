@@ -1,5 +1,5 @@
 const express = require('express');
-const { getAll, getOne, run, getDriver } = require('../config/db');
+const { getAll, getOne, run } = require('../config/db');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
@@ -14,7 +14,7 @@ const MOODS = {
 router.get('/meta/filters', async (req, res) => {
   try {
     const cities = await getAll(
-      `SELECT DISTINCT city FROM events WHERE city IS NOT NULL AND city != '' AND (is_archived = 0 OR is_archived IS NULL) ORDER BY city`
+      `SELECT DISTINCT city FROM events WHERE city IS NOT NULL AND city != '' AND NOT COALESCE(is_archived, false) ORDER BY city`
     );
     res.json({
       moods: Object.entries(MOODS).map(([id, label]) => ({ id, label })),
@@ -38,7 +38,7 @@ router.get('/meta/mood/:mood', async (req, res) => {
        FROM events e
        LEFT JOIN sectors s ON s.event_id = e.id
        LEFT JOIN seats st ON st.sector_id = s.id
-       WHERE e.mood = ? AND (e.is_archived = 0 OR e.is_archived IS NULL)
+       WHERE e.mood = ? AND NOT COALESCE(e.is_archived, false)
        GROUP BY e.id ORDER BY e.event_date ASC LIMIT 6`,
       [req.params.mood]
     );
@@ -57,7 +57,7 @@ router.get('/', async (req, res) => {
                FROM events e
                LEFT JOIN sectors s ON s.event_id = e.id
                LEFT JOIN seats st ON st.sector_id = s.id
-               WHERE (e.is_archived = 0 OR e.is_archived IS NULL OR e.is_archived = false)`;
+               WHERE NOT COALESCE(e.is_archived, false)`;
     const params = [];
 
     if (type) { sql += ' AND e.event_type = ?'; params.push(type); }
@@ -134,11 +134,7 @@ router.get('/:id/seats', async (req, res) => {
 
 router.post('/:id/favorite', requireAuth, async (req, res) => {
   try {
-    if (getDriver() === 'pg') {
-      await run('INSERT INTO favorites (user_id, event_id) VALUES (?,?) ON CONFLICT DO NOTHING', [req.user.id, req.params.id]);
-    } else {
-      await run('INSERT OR IGNORE INTO favorites (user_id, event_id) VALUES (?,?)', [req.user.id, req.params.id]);
-    }
+    await run('INSERT INTO favorites (user_id, event_id) VALUES (?,?) ON CONFLICT DO NOTHING', [req.user.id, req.params.id]);
     res.json({ ok: true, message: 'Додано в обране' });
   } catch (e) {
     res.status(500).json({ error: e.message });

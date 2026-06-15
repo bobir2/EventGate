@@ -1,51 +1,38 @@
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
 
-let db;
-let driver = 'sqlite';
+let pool;
 
 function initDb() {
-  if (process.env.DATABASE_URL) {
-    driver = 'pg';
-    const { Pool } = require('pg');
-    db = new Pool({ connectionString: process.env.DATABASE_URL, ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false });
-    return db;
+  if (!process.env.DATABASE_URL) {
+    throw new Error('DATABASE_URL не задано. Потрібен PostgreSQL.');
   }
 
-  const Database = require('better-sqlite3');
-  const dataDir = path.join(__dirname, '../../data');
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-  const dbPath = path.join(dataDir, 'eventgate.db');
-  db = new Database(dbPath);
-  db.pragma('foreign_keys = ON');
-  return db;
+  if (!pool) {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    });
+  }
+  return pool;
 }
 
-function getDriver() {
-  return driver;
+function toPgSql(sql) {
+  return sql
+    .replace(/INTEGER PRIMARY KEY AUTOINCREMENT/g, 'SERIAL PRIMARY KEY')
+    .replace(/REAL/g, 'DECIMAL(12,2)')
+    .replace(/INTEGER DEFAULT 0/g, 'BOOLEAN DEFAULT FALSE')
+    .replace(/is_blocked INTEGER/g, 'is_blocked BOOLEAN')
+    .replace(/is_archived INTEGER/g, 'is_archived BOOLEAN')
+    .replace(/is_read INTEGER/g, 'is_read BOOLEAN')
+    .replace(/datetime\('now'\)/g, 'NOW()')
+    .replace(/TEXT DEFAULT \(NOW\(\)\)/g, 'TIMESTAMPTZ DEFAULT NOW()');
 }
 
 async function query(sql, params = []) {
-  let q = sql;
-  if (driver === 'pg') {
-    let i = 0;
-    q = sql.replace(/\?/g, () => `$${++i}`);
-  }
-  if (driver === 'pg') {
-    const res = await db.query(q, params);
-    return res;
-  }
-  const isSelect = /^\s*(SELECT|PRAGMA|WITH)/i.test(sql);
-  if (isSelect) {
-    const rows = db.prepare(sql).all(...params);
-    return { rows, rowCount: rows.length };
-  }
-  const info = db.prepare(sql).run(...params);
-  return {
-    rows: [],
-    rowCount: info.changes,
-    lastInsertRowid: info.lastInsertRowid,
-  };
+  let i = 0;
+  const q = sql.replace(/\?/g, () => `$${++i}`);
+  const res = await pool.query(q, params);
+  return res;
 }
 
 async function getOne(sql, params = []) {
@@ -62,8 +49,11 @@ async function run(sql, params = []) {
   return query(sql, params);
 }
 
-function placeholder(index) {
-  return driver === 'pg' ? `$${index}` : '?';
+async function insertId(sql, params = []) {
+  let q = sql.trim().replace(/;+\s*$/, '');
+  if (!/RETURNING/i.test(q)) q += ' RETURNING id';
+  const res = await query(q, params);
+  return res.rows[0]?.id;
 }
 
-module.exports = { initDb, getDriver, query, getOne, getAll, run, placeholder };
+module.exports = { initDb, toPgSql, query, getOne, getAll, run, insertId };

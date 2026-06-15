@@ -1,4 +1,4 @@
-const { getDriver, run, getOne, getAll } = require('../config/db');
+const { run, getOne, getAll, insertId, toPgSql } = require('../config/db');
 
 async function tryRun(sql) {
   try {
@@ -30,7 +30,7 @@ async function migrate() {
   ];
 
   for (const sql of tables) {
-    await run(sql);
+    await run(toPgSql(sql));
   }
 }
 
@@ -60,18 +60,16 @@ const EVENT_CATALOG = [
 ];
 
 async function createEventWithSeats(ev) {
-  const res = await run(
+  const eventId = await insertId(
     `INSERT INTO events (title, description, event_type, venue, city, mood, event_date, image_url) VALUES (?,?,?,?,?,?,?,?)`,
     [ev.title, ev.description, ev.event_type, ev.venue, ev.city, ev.mood, ev.event_date, ev.image_url]
   );
-  const eventId = res.lastInsertRowid || (await getOne('SELECT id FROM events ORDER BY id DESC LIMIT 1'))?.id;
 
   for (const sec of ev.sectors) {
-    const r = await run(
+    const sectorId = await insertId(
       `INSERT INTO sectors (event_id, name, price, rows_count, seats_per_row) VALUES (?,?,?,?,?)`,
       [eventId, sec.name, sec.price, sec.rows, sec.seats]
     );
-    const sectorId = r.lastInsertRowid || (await getOne('SELECT id FROM sectors WHERE event_id = ? ORDER BY id DESC LIMIT 1', [eventId]))?.id;
     for (let row = 1; row <= sec.rows; row++) {
       for (let seat = 1; seat <= sec.seats; seat++) {
         await run('INSERT INTO seats (sector_id, row_num, seat_num, status) VALUES (?,?,?,?)', [sectorId, row, seat, 'free']);
@@ -172,7 +170,7 @@ async function ensureMarketplaceListings() {
   const events = await getAll(
     `SELECT e.id, e.title, MIN(s.price) as price FROM events e
      JOIN sectors s ON s.event_id = e.id
-     WHERE e.is_archived = 0 OR e.is_archived IS NULL
+     WHERE NOT COALESCE(e.is_archived, false)
      GROUP BY e.id ORDER BY e.event_date LIMIT 8`
   );
 
@@ -199,11 +197,10 @@ async function ensureMarketplaceListings() {
     if (!seat) continue;
 
     await run("UPDATE seats SET status = 'sold' WHERE id = ?", [seat.id]);
-    const orderRes = await run(
+    const orderId = await insertId(
       'INSERT INTO orders (user_id, seat_id, total_price, status) VALUES (?,?,?,?)',
       [seller.id, seat.id, seat.price, 'active']
     );
-    const orderId = orderRes.lastInsertRowid || (await getOne('SELECT id FROM orders ORDER BY id DESC LIMIT 1'))?.id;
     const listPrice = Math.round(Number(seat.price) * discounts[i % discounts.length]);
 
     await run(
