@@ -1,0 +1,21 @@
+{
+  "name": "eventgate",
+  "version": "1.0.0",
+  "description": "Сервіс продажу квитків на події",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "db:init": "node server/db/init.js",
+    "db:reset": "rm -f data/eventgate.db && node server/db/init.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.0"
+  }
+}

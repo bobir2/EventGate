@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Вторинний ринок — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Вторинний ринок</h1>
+      <p class="meta" style="margin-bottom:24px">Оголошення від користувачів з перевіркою адміністратором.</p>
+      <div id="listings" class="grid"></div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+
+  <script src="/js/api.js"></script>
+  <script>
+    async function load() {
+      const { listings } = await api('/marketplace');
+      const el = document.getElementById('listings');
+
+      if (!listings.length) {
+        el.innerHTML = '<p class="meta">Немає активних оголошень. <a href="/profile.html">Продайте свій квиток</a> у профілі.</p>';
+        return;
+      }
+
+      el.innerHTML = listings.map(l => `
+        <div class="event-card">
+          ${eventImg({ title: l.event_title, event_type: l.event_type, image_url: l.image_url })}
+          <div class="event-card-body">
+            ${typeBadge(l.event_type || 'concert')}
+            <h3>${l.event_title}</h3>
+            <p class="meta">${l.city}, ${l.venue}</p>
+            <p class="meta">${formatDate(l.event_date)}</p>
+            <p class="meta">${l.sector_name}, ряд ${l.row_num}, м. ${l.seat_num}</p>
+            <p class="meta">Продавець: ${l.seller_name || '—'}</p>
+            <p class="price">${formatPrice(l.price)}</p>
+            ${getToken() ? `<button class="btn btn-primary btn-sm" style="margin-top:12px;width:100%" onclick="buy(${l.id}, '${l.event_title.replace(/'/g, "\\'")}', ${l.price})">Купити квиток</button>` : `<a href="/login.html" class="btn btn-outline btn-sm" style="margin-top:12px;display:block;text-align:center">Увійти для покупки</a>`}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function buy(id, title, price) {
+      const ok = await confirmModal({
+        title: 'Підтвердження покупки',
+        message: `Купити квиток на «${title}» за ${formatPrice(price)}? Кошти будуть списані з вашого балансу.`,
+        confirmText: 'Купити',
+        cancelText: 'Скасувати',
+        type: 'primary',
+      });
+      if (!ok) return;
+      try {
+        await api('/marketplace/' + id + '/buy', { method: 'POST' });
+        toast('Квиток придбано', 'success');
+        await refreshUserBalance();
+        load();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    load();
+  </script>
+</body>
+</html>

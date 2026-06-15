@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Реєстрація — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <div class="auth-box">
+    <h2>Реєстрація</h2>
+    <div id="alert"></div>
+    <div class="form-group"><label>ПІБ</label><input id="full_name"></div>
+    <div class="form-group"><label>Email</label><input id="email" type="email"></div>
+    <div class="form-group"><label>Телефон</label><input id="phone" type="tel"></div>
+    <div class="form-group"><label>Пароль</label><input id="password" type="password" minlength="6"></div>
+    <button class="btn btn-primary" style="width:100%" onclick="register()">Зареєструватися</button>
+    <p style="text-align:center;margin-top:16px" class="meta">
+      Вже є акаунт? <a href="/login.html">Увійти</a>
+    </p>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script>
+    async function register() {
+      try {
+        const data = await api('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({
+            full_name: document.getElementById('full_name').value,
+            email: document.getElementById('email').value,
+            phone: document.getElementById('phone').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        setAuth(data.token, data.user);
+        location.href = '/profile.html';
+      } catch (e) {
+        document.getElementById('alert').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+      }
+    }
+  </script>
+</body>
+</html>

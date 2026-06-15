@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Кошик — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Кошик</h1>
+      <div id="alert"></div>
+      <div id="cart"></div>
+
+      <div id="checkoutForm" class="hidden" style="max-width:500px;margin-top:24px">
+        <h3>Оформлення замовлення</h3>
+        <div class="form-group"><label>ПІБ</label><input id="full_name" required></div>
+        <div class="form-group"><label>Телефон</label><input id="phone" type="tel"></div>
+        <div class="form-group"><label>Email</label><input id="email" type="email"></div>
+        <p class="meta">Оплата з внутрішнього балансу</p>
+        <button class="btn btn-primary" onclick="checkout()">Підтвердити покупку</button>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+
+  <script src="/js/api.js"></script>
+  <script>
+    if (!getToken()) location.href = '/login.html';
+
+    async function load() {
+      const { items, total } = await api('/cart');
+      const cart = document.getElementById('cart');
+
+      if (!items.length) {
+        cart.innerHTML = '<p class="meta">Кошик порожній. <a href="/catalog.html">Перейти до каталогу</a></p>';
+        document.getElementById('checkoutForm').classList.add('hidden');
+        return;
+      }
+
+      cart.innerHTML = items.map(i => `
+        <div class="cart-item">
+          <div>
+            <strong>${i.event_title}</strong><br>
+            <span class="meta">${i.sector_name}, ряд ${i.row_num}, місце ${i.seat_num}</span><br>
+            <span class="meta">${formatDate(i.event_date)} · ${i.venue}</span>
+          </div>
+          <div style="text-align:right">
+            <div class="price">${formatPrice(i.price)}</div>
+            <button class="btn btn-sm btn-danger" onclick="removeItem(${i.seat_id})">Видалити</button>
+          </div>
+        </div>
+      `).join('') + `<div class="cart-total">Разом: ${formatPrice(total)}</div>`;
+
+      document.getElementById('checkoutForm').classList.remove('hidden');
+      const user = getUser();
+      if (user) {
+        document.getElementById('full_name').value = user.full_name || '';
+        document.getElementById('email').value = user.email || '';
+      }
+    }
+
+    async function removeItem(seatId) {
+      await api('/cart/' + seatId, { method: 'DELETE' });
+      load();
+    }
+
+    async function checkout() {
+      try {
+        await api('/orders/checkout', {
+          method: 'POST',
+          body: JSON.stringify({
+            full_name: document.getElementById('full_name').value,
+            phone: document.getElementById('phone').value,
+            email: document.getElementById('email').value,
+          }),
+        });
+        toast('Замовлення оформлено', 'success');
+        await refreshUserBalance();
+        load();
+      } catch (e) {
+        toast(e.message, 'error');
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>

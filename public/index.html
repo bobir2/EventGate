@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EventGate — Продаж квитків</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="hero">
+    <div class="container">
+      <h1>Квитки на концерти, стендап і кіно</h1>
+      <p>15+ подій у Києві, Львові, Одесі та Харкові. Вибір місць, аукціони, вторинний ринок і маршрут вечора.</p>
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:8px">
+        <a href="/catalog.html" class="btn btn-primary">Каталог</a>
+        <a href="/evening.html" class="btn btn-outline">Зібрати вечір</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <h2 class="section-title">Підбір за настроєм</h2>
+      <div class="mood-grid" id="moods"></div>
+    </div>
+  </section>
+
+  <section class="section" style="background:var(--surface)">
+    <div class="container">
+      <h2 class="section-title">Найближчі події</h2>
+      <div id="upcoming" class="grid"></div>
+      <p style="text-align:center;margin-top:24px"><a href="/catalog.html" class="btn btn-outline">Усі події →</a></p>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container">
+      <h2 class="section-title">Можливості EventGate</h2>
+      <div class="grid">
+        <div class="event-card"><div class="event-card-body"><h3>Каталог</h3><p class="meta">Фільтри за типом, містом, ціною, датою та настроєм. Сітка, список і таблиця.</p></div></div>
+        <div class="event-card"><div class="event-card-body"><h3>Схема залу</h3><p class="meta">Сектори, ряди, місця. Перегляд без покупки.</p></div></div>
+        <div class="event-card"><div class="event-card-body"><h3>Маршрут вечора</h3><p class="meta">Зберіть кілька подій на один вечір.</p></div></div>
+        <div class="event-card"><div class="event-card-body"><h3>Аукціони</h3><p class="meta">Ставки та миттєвий викуп квитків.</p></div></div>
+        <div class="event-card"><div class="event-card-body"><h3>Вторинний ринок</h3><p class="meta">Продаж квитків з модерацією адміністратора.</p></div></div>
+        <div class="event-card"><div class="event-card-body"><h3>Кабінет</h3><p class="meta">Баланс, історія, календар, обране.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+  <script src="/js/api.js"></script>
+  <script>
+    const MOODS = [
+      { id: 'energetic', label: 'Енергійний', desc: 'Концерти та фестивалі' },
+      { id: 'romantic', label: 'Романтичний', desc: 'Джаз та open-air кіно' },
+      { id: 'fun', label: 'Веселий', desc: 'Стендап і комедія' },
+      { id: 'cultural', label: 'Культурний', desc: 'Кіно та фестивалі' },
+    ];
+
+    document.getElementById('moods').innerHTML = MOODS.map(m => `
+      <a href="/catalog.html?mood=${m.id}" class="mood-card mood-${m.id}" style="text-decoration:none;color:inherit">
+        <h3>${m.label}</h3>
+        <p class="meta">${m.desc}</p>
+      </a>
+    `).join('');
+
+    api('/events?sort=date_asc').then(({ events }) => {
+      document.getElementById('upcoming').innerHTML = events.slice(0, 6).map(e => `
+        <a href="/event.html?id=${e.id}" class="event-card" style="text-decoration:none;color:inherit">
+          ${eventImg(e)}
+          <div class="event-card-body">
+            ${typeBadge(e.event_type)} ${moodBadge(e.mood)}
+            <h3>${e.title}</h3>
+            <p class="meta">${e.city} · ${formatDate(e.event_date)}</p>
+            <p class="price">від ${formatPrice(e.min_price || 0)}</p>
+          </div>
+        </a>
+      `).join('');
+    }).catch(() => {});
+  </script>
+</body>
+</html>

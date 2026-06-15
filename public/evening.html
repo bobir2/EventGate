@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Маршрут вечора — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Маршрут вечора</h1>
+      <p class="meta" style="margin-bottom:24px">Кілька подій на один вечір</p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px" class="event-layout">
+        <div>
+          <h3>Автопідбір</h3>
+          <div class="form-group">
+            <label>Дата вечора</label>
+            <input type="date" id="routeDate">
+          </div>
+          <button class="btn btn-primary" onclick="suggest()">Підібрати події</button>
+
+          <div id="suggested" style="margin-top:24px"></div>
+
+          <hr style="border-color:#2d3148;margin:24px 0">
+
+          <h3>Зберегти маршрут</h3>
+          <div class="form-group"><label>Назва маршруту</label><input id="routeTitle" placeholder="Наприклад: Романтичний вечір"></div>
+          <button class="btn btn-success" onclick="saveRoute()">Зберегти</button>
+        </div>
+
+        <div>
+          <h3>Мої маршрути</h3>
+          <div id="savedRoutes"><p class="meta">Завантаження...</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+  <script src="/js/api.js"></script>
+  <script>
+    let selectedIds = new Set();
+
+    document.getElementById('routeDate').value = new Date().toISOString().slice(0, 10);
+
+    const addParam = new URLSearchParams(location.search).get('add');
+    if (addParam) selectedIds.add(Number(addParam));
+
+    async function suggest() {
+      const date = document.getElementById('routeDate').value;
+      const { suggested, all } = await api('/evening/suggest?date=' + date);
+      if (!suggested.length && !all.length) {
+        document.getElementById('suggested').innerHTML = '<p class="meta">На цю дату подій немає. Спробуйте іншу дату або <a href="/catalog.html">перегляньте каталог</a>.</p>';
+        return;
+      }
+      const list = suggested.length ? suggested : all.slice(0, 4);
+      list.forEach(e => selectedIds.add(e.id));
+
+      document.getElementById('suggested').innerHTML = `
+        <p class="meta" style="margin-bottom:12px">Оберіть події для маршруту:</p>
+        <div class="route-timeline" id="routeList">
+          ${list.map((e, i) => routeItem(e, i + 1)).join('')}
+        </div>`;
+      bindCheckboxes();
+    }
+
+    function routeItem(e, num) {
+      const checked = selectedIds.has(e.id) ? 'checked' : '';
+      return `<div class="route-step">
+        <span class="num">${num}</span>
+        <input type="checkbox" data-id="${e.id}" ${checked}>
+        <div style="flex:1">
+          <strong>${e.title}</strong><br>
+          <span class="meta">${e.city || ''} · ${formatDate(e.event_date)} · від ${formatPrice(e.min_price || 0)}</span><br>
+          <a href="/event.html?id=${e.id}" class="btn btn-sm btn-outline" style="margin-top:8px">Деталі</a>
+        </div>
+      </div>`;
+    }
+
+    function bindCheckboxes() {
+      document.querySelectorAll('#routeList input[type=checkbox]').forEach(cb => {
+        cb.onchange = () => {
+          const id = Number(cb.dataset.id);
+          if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+        };
+      });
+    }
+
+    async function saveRoute() {
+      if (!getToken()) { location.href = '/login.html'; return; }
+      const title = document.getElementById('routeTitle').value.trim();
+      if (!title) { toast('Вкажіть назву маршруту', 'error'); return; }
+      if (!selectedIds.size) { toast('Оберіть хоча б одну подію', 'error'); return; }
+      try {
+        await api('/evening', { method: 'POST', body: JSON.stringify({ title, event_ids: [...selectedIds] }) });
+        toast('Маршрут збережено', 'success');
+        loadSaved();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function loadSaved() {
+      if (!getToken()) {
+        document.getElementById('savedRoutes').innerHTML = '<p class="meta"><a href="/login.html">Увійдіть</a>, щоб зберігати маршрути</p>';
+        return;
+      }
+      const { routes } = await api('/evening');
+      if (!routes.length) {
+        document.getElementById('savedRoutes').innerHTML = '<p class="meta">Ще немає збережених маршрутів</p>';
+        return;
+      }
+      document.getElementById('savedRoutes').innerHTML = routes.map(r => `
+        <div class="event-card" style="margin-bottom:12px">
+          <div class="event-card-body">
+            <h3>${r.title}</h3>
+            <p class="meta">${formatDate(r.created_at)} · ${r.events.length} подій</p>
+            <ul style="margin:12px 0;padding-left:20px;color:var(--muted)">
+              ${r.events.map(e => `<li><a href="/event.html?id=${e.id}">${e.title}</a> — ${formatDate(e.event_date)}</li>`).join('')}
+            </ul>
+            <button class="btn btn-sm btn-danger" onclick="deleteRoute(${r.id})">Видалити</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function deleteRoute(id) {
+      await api('/evening/' + id, { method: 'DELETE' });
+      toast('Маршрут видалено');
+      loadSaved();
+    }
+
+    suggest();
+    loadSaved();
+  </script>
+</body>
+</html>

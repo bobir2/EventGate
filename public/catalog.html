@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Каталог — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Каталог подій</h1>
+      <p class="meta" style="margin-bottom:18px">Пошук і фільтрація подій</p>
+
+      <div class="filters-row">
+        <input type="search" id="search" placeholder="Пошук...">
+        <select id="type"><option value="">Усі типи</option></select>
+        <select id="city"><option value="">Усі міста</option></select>
+        <select id="mood"><option value="">Усі настрої</option></select>
+        <input type="number" id="price_min" placeholder="Ціна від ₴" min="0">
+        <input type="number" id="price_max" placeholder="Ціна до ₴" min="0">
+        <input type="date" id="date_from">
+        <input type="date" id="date_to">
+        <select id="sort">
+          <option value="date_asc">Дата ↑</option>
+          <option value="date_desc">Дата ↓</option>
+          <option value="price_asc">Ціна ↑</option>
+          <option value="price_desc">Ціна ↓</option>
+          <option value="title">За назвою</option>
+        </select>
+      </div>
+
+      <div class="filters" style="margin-top:0">
+        <div class="view-toggle">
+          <button class="btn btn-sm btn-outline active" id="viewGrid">Сітка</button>
+          <button class="btn btn-sm btn-outline" id="viewList">Список</button>
+          <button class="btn btn-sm btn-outline" id="viewTable">Таблиця</button>
+        </div>
+        <span id="count" class="meta" style="margin-left:auto"></span>
+      </div>
+
+      <div id="events" class="grid"></div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+  <script src="/js/api.js"></script>
+  <script>
+    let viewMode = 'grid';
+    let debounce;
+
+    async function loadFilters() {
+      const meta = await api('/events/meta/filters');
+      document.getElementById('type').innerHTML = '<option value="">Усі типи</option>' +
+        meta.types.map(t => `<option value="${t.id}">${t.label}</option>`).join('');
+      document.getElementById('city').innerHTML = '<option value="">Усі міста</option>' +
+        meta.cities.map(c => `<option value="${c}">${c}</option>`).join('');
+      document.getElementById('mood').innerHTML = '<option value="">Усі настрої</option>' +
+        meta.moods.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+    }
+
+    function cardHtml(e) {
+      return `
+        <a href="/event.html?id=${e.id}" class="event-card" style="text-decoration:none;color:inherit">
+          ${eventImg(e)}
+          <div class="event-card-body">
+            ${typeBadge(e.event_type)} ${moodBadge(e.mood)}
+            <h3>${e.title}</h3>
+            <p class="meta">${e.city || ''} · ${e.venue}<br>${formatDate(e.event_date)}</p>
+            <p class="price">від ${formatPrice(e.min_price || 0)} · ${e.free_seats || 0} вільних</p>
+          </div>
+        </a>`;
+    }
+
+    async function load() {
+      const params = new URLSearchParams({ sort: document.getElementById('sort').value, view: viewMode });
+      ['search','type','city','mood','price_min','price_max','date_from','date_to'].forEach(id => {
+        const v = document.getElementById(id).value;
+        if (v) params.set(id, v);
+      });
+
+      const { events } = await api('/events?' + params);
+      const container = document.getElementById('events');
+      document.getElementById('count').textContent = `Знайдено: ${events.length}`;
+
+      if (!events.length) {
+        container.className = '';
+        container.innerHTML = '<p class="meta">Подій не знайдено. Спробуйте змінити фільтри.</p>';
+        return;
+      }
+
+      if (viewMode === 'table') {
+        container.className = 'table-wrap';
+        container.innerHTML = `<table class="events-table">
+          <tr><th>Назва</th><th>Тип</th><th>Місто</th><th>Дата</th><th>Ціна від</th><th>Вільно</th></tr>
+          ${events.map(e => `<tr>
+            <td><a href="/event.html?id=${e.id}">${e.title}</a></td>
+            <td>${typeBadge(e.event_type)}</td>
+            <td>${e.city || '—'}</td>
+            <td>${formatDate(e.event_date)}</td>
+            <td>${formatPrice(e.min_price || 0)}</td>
+            <td>${e.free_seats || 0}</td>
+          </tr>`).join('')}
+        </table>`;
+      } else {
+        container.className = viewMode === 'list' ? 'grid grid-list' : 'grid';
+        container.innerHTML = events.map(cardHtml).join('');
+      }
+    }
+
+    function setView(mode, btn) {
+      viewMode = mode;
+      document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      load();
+    }
+
+    document.getElementById('viewGrid').onclick = (e) => setView('grid', e.target);
+    document.getElementById('viewList').onclick = (e) => setView('list', e.target);
+    document.getElementById('viewTable').onclick = (e) => setView('table', e.target);
+
+    document.querySelectorAll('.filters-row input, .filters-row select').forEach(el => {
+      el.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(load, 300); });
+      el.addEventListener('change', load);
+    });
+
+    const urlParams = new URLSearchParams(location.search);
+    loadFilters().then(() => {
+      if (urlParams.get('mood')) document.getElementById('mood').value = urlParams.get('mood');
+      if (urlParams.get('type')) document.getElementById('type').value = urlParams.get('type');
+      if (urlParams.get('city')) document.getElementById('city').value = urlParams.get('city');
+      load();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Аукціони — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Аукціони квитків</h1>
+      <div id="auctions"></div>
+      <div id="detail" class="hidden" style="margin-top:32px;padding:24px;background:var(--surface);border-radius:12px"></div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+
+  <script src="/js/api.js"></script>
+  <script>
+    let currentAuction = null;
+
+    async function load() {
+      const { auctions } = await api('/auctions');
+      const el = document.getElementById('auctions');
+
+      if (!auctions.length) {
+        el.innerHTML = '<p class="meta">Немає активних аукціонів</p>';
+        return;
+      }
+
+      el.innerHTML = `<div class="grid">${auctions.map(a => `
+        <div class="event-card">
+          <div class="event-card-body">
+            <h3>${a.event_title}</h3>
+            <p class="meta">${a.sector_name}, ряд ${a.row_num}, місце ${a.seat_num}</p>
+            <p class="price">Поточна ставка: ${formatPrice(a.current_price)}</p>
+            <p class="meta">Викуп: ${formatPrice(a.buy_now_price)}</p>
+            <button class="btn btn-primary btn-sm" style="margin-top:12px" onclick="showDetail(${a.id})">Деталі</button>
+          </div>
+        </div>
+      `).join('')}</div>`;
+    }
+
+    async function showDetail(id) {
+      const { auction, bids } = await api('/auctions/' + id);
+      currentAuction = auction;
+      const el = document.getElementById('detail');
+      el.classList.remove('hidden');
+      el.innerHTML = `
+        <h3>${auction.event_title}</h3>
+        <p class="meta">${auction.sector_name}, ряд ${auction.row_num}, місце ${auction.seat_num}</p>
+        <p class="price">Поточна ціна: ${formatPrice(auction.current_price)}</p>
+        ${getToken() ? `
+          <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+            <div class="form-group" style="margin:0"><label>Ставка (₴)</label>
+              <input id="bidAmount" type="number" min="${auction.current_price + 1}" value="${Number(auction.current_price) + 50}"></div>
+            <button class="btn btn-primary" onclick="placeBid(${id})">Подати ставку</button>
+            <button class="btn btn-success" onclick="buyNow(${id})">Викупити за ${formatPrice(auction.buy_now_price)}</button>
+          </div>
+        ` : '<p><a href="/login.html">Увійти</a> для участі</p>'}
+        <h4 style="margin-top:20px">Історія ставок</h4>
+        ${bids.length ? bids.map(b => `<p class="meta">${b.full_name || b.email}: ${formatPrice(b.amount)} — ${formatDate(b.created_at)}</p>`).join('') : '<p class="meta">Ставок ще немає</p>'}
+      `;
+    }
+
+    async function placeBid(id) {
+      try {
+        const amount = Number(document.getElementById('bidAmount').value);
+        await api('/auctions/' + id + '/bid', { method: 'POST', body: JSON.stringify({ amount }) });
+        toast('Ставку прийнято', 'success');
+        showDetail(id);
+        load();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function buyNow(id) {
+      const price = currentAuction?.buy_now_price || 0;
+      const ok = await confirmModal({
+        title: 'Викуп квитка',
+        message: `Викупити квиток на «${currentAuction?.event_title || 'подію'}» за ${formatPrice(price)}? Кошти будуть списані з балансу.`,
+        confirmText: 'Викупити',
+        cancelText: 'Скасувати',
+        type: 'success',
+      });
+      if (!ok) return;
+      try {
+        await api('/auctions/' + id + '/buy-now', { method: 'POST' });
+        toast('Квиток викуплено', 'success');
+        await refreshUserBalance();
+        setTimeout(() => { location.href = '/profile.html'; }, 800);
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    load();
+  </script>
+</body>
+</html>

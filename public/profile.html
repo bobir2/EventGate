@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Профіль — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Особистий кабінет</h1>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="info">Профіль</button>
+        <button class="tab" data-tab="orders">Мої квитки</button>
+        <button class="tab" data-tab="favorites">Обране</button>
+        <button class="tab" data-tab="calendar">Календар</button>
+        <button class="tab" data-tab="listings">Мої оголошення</button>
+        <button class="tab" data-tab="balance">Баланс</button>
+      </div>
+
+      <div id="info" class="panel active"></div>
+      <div id="orders" class="panel"></div>
+      <div id="favorites" class="panel"></div>
+      <div id="calendar" class="panel"></div>
+      <div id="listings" class="panel"></div>
+      <div id="balance" class="panel"></div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+
+  <script src="/js/api.js"></script>
+  <script>
+    if (!getToken()) location.href = '/login.html';
+    let profileData = null;
+
+    document.querySelectorAll('.tab').forEach(t => {
+      t.onclick = () => {
+        document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        document.getElementById(t.dataset.tab).classList.add('active');
+      };
+    });
+
+    async function load() {
+      profileData = await api('/profile');
+      setAuth(getToken(), profileData.user);
+      renderHeader();
+
+      const u = profileData.user;
+      document.getElementById('info').innerHTML = `
+        <div style="max-width:500px">
+          <div class="form-group"><label>ПІБ</label><input id="fn" value="${u.full_name || ''}"></div>
+          <div class="form-group"><label>Телефон</label><input id="ph" value="${u.phone || ''}"></div>
+          <div class="form-group"><label>Email</label><input value="${u.email}" disabled></div>
+          <p>Баланс: <strong style="color:var(--success)">${formatPrice(u.balance)}</strong></p>
+          <button class="btn btn-primary" onclick="saveProfile()">Зберегти</button>
+        </div>
+      `;
+
+      document.getElementById('orders').innerHTML = profileData.orders.length ? `
+        <div class="table-wrap"><table>
+          <tr><th>Подія</th><th>Місце</th><th>Ціна</th><th>Статус</th><th>Дія</th></tr>
+          ${profileData.orders.map(o => `
+            <tr>
+              <td>${o.event_title}<br><small class="meta">${formatDate(o.event_date)}</small></td>
+              <td>${o.sector_name}, р.${o.row_num} м.${o.seat_num}</td>
+              <td>${formatPrice(o.total_price)}</td>
+              <td>${o.status}</td>
+              <td>${o.status === 'active' ? `<button class="btn btn-sm btn-outline" onclick="sellTicket(${o.id})">Продати</button>` : ''}</td>
+            </tr>
+          `).join('')}
+        </table></div>
+      ` : '<p class="meta">Немає квитків</p>';
+
+      document.getElementById('favorites').innerHTML = profileData.favorites.length
+        ? `<div class="grid">${profileData.favorites.map(e => `
+            <div class="event-card">
+              ${eventImg(e)}
+                <h3><a href="/event.html?id=${e.id}" style="color:inherit">${e.title}</a></h3>
+                <p class="meta">${formatDate(e.event_date)}</p>
+                <button class="btn btn-sm btn-danger" onclick="removeFav(${e.id})">Видалити</button>
+              </div>
+            </div>`).join('')}</div>`
+        : '<p class="meta">Обране порожнє. <a href="/catalog.html">Перейти до каталогу</a></p>';
+
+      document.getElementById('calendar').innerHTML = `
+        <div style="max-width:500px;margin-bottom:24px">
+          <h3>Створити подію в календарі</h3>
+          <div class="form-group"><label>Назва</label><input id="calTitle"></div>
+          <div class="form-group"><label>Дата і час</label><input id="calDate" type="datetime-local"></div>
+          <button class="btn btn-primary" onclick="addCalendar()">Додати</button>
+        </div>
+        <div id="calList"></div>
+      `;
+      loadCalendar();
+
+      document.getElementById('listings').innerHTML = profileData.listings.length ? `
+        <div class="table-wrap"><table>
+          <tr><th>Подія</th><th>Ціна</th><th>Статус</th></tr>
+          ${profileData.listings.map(l => `<tr><td>${l.event_title}</td><td>${formatPrice(l.price)}</td><td>${l.status}</td></tr>`).join('')}
+        </table></div>
+      ` : '<p class="meta">Немає оголошень</p>';
+
+      document.getElementById('balance').innerHTML = `
+        <p>Баланс: <strong>${formatPrice(u.balance)}</strong></p>
+        <div class="table-wrap" style="margin-top:16px"><table>
+          <tr><th>Дата</th><th>Сума</th><th>Тип</th><th>Опис</th></tr>
+          ${profileData.transactions.map(t => `
+            <tr>
+              <td>${formatDate(t.created_at)}</td>
+              <td style="color:${t.amount >= 0 ? 'var(--success)' : 'var(--danger)'}">${formatPrice(t.amount)}</td>
+              <td>${t.type}</td>
+              <td>${t.description || ''}</td>
+            </tr>
+          `).join('')}
+        </table></div>
+      `;
+    }
+
+    async function saveProfile() {
+      const data = await api('/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ full_name: document.getElementById('fn').value, phone: document.getElementById('ph').value }),
+      });
+      setAuth(getToken(), data.user);
+      toast('Збережено', 'success');
+    }
+
+    async function loadCalendar() {
+      const { events } = await api('/calendar');
+      document.getElementById('calList').innerHTML = events.length ? `
+        <table><tr><th>Назва</th><th>Дата</th><th></th></tr>
+        ${events.map(e => `<tr><td>${e.title}</td><td>${formatDate(e.event_date)}</td>
+          <td><button class="btn btn-sm btn-danger" onclick="delCal(${e.id})">×</button></td></tr>`).join('')}
+        </table>
+      ` : '<p class="meta">Календар порожній</p>';
+    }
+
+    async function addCalendar() {
+      await api('/calendar', {
+        method: 'POST',
+        body: JSON.stringify({ title: document.getElementById('calTitle').value, event_date: document.getElementById('calDate').value }),
+      });
+      document.getElementById('calTitle').value = '';
+      loadCalendar();
+    }
+
+    async function delCal(id) {
+      await api('/calendar/' + id, { method: 'DELETE' });
+      loadCalendar();
+    }
+
+    async function removeFav(id) {
+      await api('/events/' + id + '/favorite', { method: 'DELETE' });
+      toast('Видалено з обраного');
+      load();
+    }
+
+    async function sellTicket(orderId) {
+      const price = await promptModal({
+        title: 'Продаж квитка',
+        message: 'Вкажіть ціну, за яку хочете продати квиток на вторинному ринку.',
+        label: 'Ціна продажу (₴)',
+        placeholder: 'Наприклад: 500',
+        inputType: 'number',
+        min: 1,
+        confirmText: 'Виставити на продаж',
+      });
+      if (!price || Number(price) <= 0) return;
+      try {
+        await api('/marketplace', {
+          method: 'POST',
+          body: JSON.stringify({ order_id: orderId, price: Number(price), transfer_method: 'електронно' }),
+        });
+        toast('Оголошення надіслано на модерацію', 'success');
+        load();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    load();
+  </script>
+</body>
+</html>

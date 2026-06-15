@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Подія — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+  <section class="section">
+    <div class="container" id="content"><p>Завантаження...</p></div>
+  </section>
+  <footer class="footer">EventGate © 2026</footer>
+  <script src="/js/api.js"></script>
+  <script>
+    const id = new URLSearchParams(location.search).get('id');
+    let selectedSeat = null;
+    let previewMode = false;
+    let eventData = null;
+    let seatsData = [];
+    let activeSector = 'all';
+    let isFavorite = false;
+
+    async function fetchData() {
+      eventData = await api('/events/' + id);
+      const res = await api('/events/' + id + '/seats');
+      seatsData = res.seats;
+      isFavorite = !!eventData.isFavorite;
+    }
+
+    function render() {
+      const bySector = {};
+      seatsData.forEach(s => {
+        if (activeSector !== 'all' && String(s.sector_id) !== activeSector) return;
+        if (!bySector[s.sector_id]) bySector[s.sector_id] = { name: s.sector_name, price: s.price, id: s.sector_id, seats: [] };
+        bySector[s.sector_id].seats.push(s);
+      });
+
+      document.getElementById('content').innerHTML = `
+        <div class="event-layout">
+          <div>
+            ${eventImg(eventData, 'event-hero-img')}
+            ${typeBadge(eventData.event_type)} ${moodBadge(eventData.mood)}
+            <h1 style="margin:12px 0">${eventData.title}</h1>
+            <p class="meta">${eventData.city}, ${eventData.venue}</p>
+            <p class="meta">${formatDate(eventData.event_date)}</p>
+            <p style="margin-top:14px;line-height:1.65;font-size:.95rem">${eventData.description || ''}</p>
+            <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-outline btn-sm" id="previewBtn">${previewMode ? 'Режим покупки' : 'Перегляд місця'}</button>
+              ${getToken() ? `<button class="btn btn-outline btn-sm" id="favBtn">${isFavorite ? 'В обраному' : 'В обране'}</button>` : ''}
+              <a href="/evening.html?add=${id}" class="btn btn-outline btn-sm">+ До маршруту вечора</a>
+            </div>
+          </div>
+          <div>
+            <h3>Вибір місця</h3>
+            <div class="pills" id="sectorPills"></div>
+            <div class="stage">СЦЕНА / ЕКРАН</div>
+            <div class="seat-map" id="seatMap"></div>
+            <div class="seat-legend" style="display:flex;gap:14px;margin:10px 0;font-size:.78rem;color:var(--muted)">
+              <span>Вільне</span><span>Резерв</span><span>Зайняте</span>
+            </div>
+            <div id="seatInfo" class="alert alert-info hidden"></div>
+            <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-primary" id="addCartBtn" disabled>Додати в кошик</button>
+              <a href="/cart.html" class="btn btn-outline">Перейти в кошик</a>
+            </div>
+          </div>
+        </div>
+        <h3 style="margin-top:32px">Сектори та ціни</h3>
+        <div class="grid" style="margin-top:12px">
+          ${eventData.sectors.map(s => `
+            <div class="stat-card" style="cursor:pointer" data-sector="${s.id}">
+              <div class="value">${formatPrice(s.price)}</div>
+              <div class="label">${s.name} · ${s.free_count} вільних</div>
+            </div>
+          `).join('')}
+        </div>`;
+
+      document.getElementById('sectorPills').innerHTML =
+        `<span class="pill ${activeSector==='all'?'active':''}" data-s="all">Усі</span>` +
+        eventData.sectors.map(s => `<span class="pill ${activeSector==String(s.id)?'active':''}" data-s="${s.id}">${s.name}</span>`).join('');
+
+      document.querySelectorAll('.pill').forEach(p => {
+        p.onclick = () => { activeSector = p.dataset.s; selectedSeat = null; render(); bindSeatMap(bySector); };
+      });
+      document.querySelectorAll('[data-sector]').forEach(c => {
+        c.onclick = () => { activeSector = c.dataset.sector; selectedSeat = null; render(); };
+      });
+
+      document.getElementById('previewBtn').onclick = () => {
+        previewMode = !previewMode;
+        selectedSeat = null;
+        render();
+      };
+      document.getElementById('favBtn')?.addEventListener('click', toggleFavorite);
+      document.getElementById('addCartBtn').onclick = addToCart;
+      bindSeatMap(bySector);
+    }
+
+    function bindSeatMap(bySector) {
+      const map = document.getElementById('seatMap');
+      if (!map) return;
+      map.innerHTML = Object.values(bySector).map(sec => `
+        <div class="sector-block">
+          <h4>${sec.name} — ${formatPrice(sec.price)}</h4>
+          ${groupByRow(sec.seats).map(([row, rowSeats]) => `
+            <div class="seats-row">
+              <span class="row-label">${row}</span>
+              ${rowSeats.map(s => `
+                <button class="seat ${s.status} ${selectedSeat?.id==s.id?(previewMode?'preview':'selected'):''}"
+                  data-id="${s.id}" data-row="${s.row_num}" data-seat="${s.seat_num}"
+                  data-sector="${sec.name}" data-price="${sec.price}"
+                  ${s.status !== 'free' ? 'disabled' : ''}>${s.seat_num}</button>
+              `).join('')}
+            </div>`).join('')}
+        </div>`).join('');
+
+      map.querySelectorAll('.seat.free').forEach(btn => {
+        btn.onclick = () => selectSeat(btn);
+      });
+    }
+
+    function groupByRow(seats) {
+      const rows = {};
+      seats.forEach(s => { if (!rows[s.row_num]) rows[s.row_num] = []; rows[s.row_num].push(s); });
+      return Object.entries(rows).sort((a,b) => a[0]-b[0]);
+    }
+
+    function selectSeat(btn) {
+      selectedSeat = { id: btn.dataset.id, row: btn.dataset.row, seat: btn.dataset.seat, sector: btn.dataset.sector, price: btn.dataset.price };
+      const info = document.getElementById('seatInfo');
+      info.classList.remove('hidden');
+      info.innerHTML = previewMode
+        ? `Перегляд: ${selectedSeat.sector}, ряд ${selectedSeat.row}, місце ${selectedSeat.seat} — ${formatPrice(selectedSeat.price)}`
+        : `Обрано: ${selectedSeat.sector}, ряд ${selectedSeat.row}, місце ${selectedSeat.seat} — ${formatPrice(selectedSeat.price)}`;
+      document.getElementById('addCartBtn').disabled = previewMode;
+      document.querySelectorAll('.seat').forEach(s => s.classList.remove('selected','preview'));
+      btn.classList.add(previewMode ? 'preview' : 'selected');
+    }
+
+    async function addToCart() {
+      if (!getToken()) { location.href = '/login.html?redirect=' + encodeURIComponent(location.href); return; }
+      if (!selectedSeat) return;
+      try {
+        await api('/cart', { method: 'POST', body: JSON.stringify({ seat_id: Number(selectedSeat.id) }) });
+        toast('Додано в кошик', 'success');
+        updateCartBadge();
+        const res = await api('/events/' + id + '/seats');
+        seatsData = res.seats;
+        render();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function toggleFavorite() {
+      try {
+        if (isFavorite) {
+          await api('/events/' + id + '/favorite', { method: 'DELETE' });
+          isFavorite = false;
+          toast('Видалено з обраного');
+        } else {
+          await api('/events/' + id + '/favorite', { method: 'POST' });
+          isFavorite = true;
+          toast('Додано в обране', 'success');
+        }
+        document.getElementById('favBtn').textContent = isFavorite ? 'В обраному' : 'В обране';
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    if (!id) {
+      document.getElementById('content').innerHTML = '<div class="alert alert-error">Подію не вказано</div>';
+    } else {
+      fetchData().then(render).catch(e => {
+        document.getElementById('content').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+      });
+    }
+  </script>
+</body>
+</html>

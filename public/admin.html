@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Адмін-панель — EventGate</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div id="header"></div>
+
+  <section class="section">
+    <div class="container">
+      <h1 class="section-title">Панель адміністратора</h1>
+      <div id="stats" class="stats-grid"></div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="users">Користувачі</button>
+        <button class="tab" data-tab="orders">Замовлення</button>
+        <button class="tab" data-tab="events">Події</button>
+        <button class="tab" data-tab="moderation">Модерація</button>
+        <button class="tab" data-tab="notifications">Сповіщення</button>
+      </div>
+
+      <div id="users" class="panel active"></div>
+      <div id="orders" class="panel"></div>
+      <div id="events" class="panel"></div>
+      <div id="moderation" class="panel"></div>
+      <div id="notifications" class="panel"></div>
+    </div>
+  </section>
+
+  <footer class="footer">EventGate © 2026</footer>
+
+  <script src="/js/api.js"></script>
+  <script>
+    if (!getToken() || getUser()?.role !== 'admin') location.href = '/login.html';
+
+    document.querySelectorAll('.tab').forEach(t => {
+      t.onclick = () => {
+        document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        document.getElementById(t.dataset.tab).classList.add('active');
+      };
+    });
+
+    async function load() {
+      const stats = await api('/admin/stats');
+      document.getElementById('stats').innerHTML = `
+        <div class="stat-card"><div class="value">${stats.users}</div><div class="label">Користувачів</div></div>
+        <div class="stat-card"><div class="value">${stats.events}</div><div class="label">Подій</div></div>
+        <div class="stat-card"><div class="value">${stats.orders}</div><div class="label">Замовлень</div></div>
+        <div class="stat-card"><div class="value">${formatPrice(stats.revenue)}</div><div class="label">Виручка</div></div>
+        <div class="stat-card"><div class="value">${stats.pending_listings}</div><div class="label">На модерації</div></div>
+      `;
+
+      const { users } = await api('/admin/users');
+      document.getElementById('users').innerHTML = `
+        <div class="table-wrap"><table>
+          <tr><th>Email</th><th>Імʼя</th><th>Баланс</th><th>Роль</th><th>Дії</th></tr>
+          ${users.map(u => `
+            <tr>
+              <td>${u.email}</td><td>${u.full_name || ''}</td>
+              <td>${formatPrice(u.balance)}</td><td>${u.role}</td>
+              <td>
+                <button class="btn btn-sm btn-success" onclick="topup(${u.id})">+₴</button>
+                ${u.role !== 'admin' ? `<button class="btn btn-sm btn-danger" onclick="block(${u.id},${u.is_blocked ? 0 : 1})">${u.is_blocked ? 'Розблок.' : 'Блок'}</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </table></div>
+      `;
+
+      const { orders } = await api('/admin/orders');
+      document.getElementById('orders').innerHTML = `
+        <div class="table-wrap"><table>
+          <tr><th>Користувач</th><th>Подія</th><th>Місце</th><th>Сума</th><th>Статус</th><th></th></tr>
+          ${orders.map(o => `
+            <tr>
+              <td>${o.full_name || o.email}</td>
+              <td>${o.event_title}</td>
+              <td>${o.sector_name} р.${o.row_num} м.${o.seat_num}</td>
+              <td>${formatPrice(o.total_price)}</td>
+              <td>${o.status}</td>
+              <td>
+                <select onchange="setOrderStatus(${o.id}, this.value)">
+                  <option value="active" ${o.status==='active'?'selected':''}>active</option>
+                  <option value="completed" ${o.status==='completed'?'selected':''}>completed</option>
+                  <option value="cancelled" ${o.status==='cancelled'?'selected':''}>cancelled</option>
+                </select>
+              </td>
+            </tr>
+          `).join('')}
+        </table></div>
+      `;
+
+      const { events } = await api('/admin/events');
+      document.getElementById('events').innerHTML = `
+        <div style="max-width:600px;margin-bottom:24px;padding:20px;background:var(--surface);border-radius:12px">
+          <h3>Додати подію</h3>
+          <div class="form-group"><label>Назва</label><input id="evTitle"></div>
+          <div class="form-group"><label>Тип</label><select id="evType"><option value="concert">Концерт</option><option value="standup">Стендап</option><option value="cinema">Кіно</option></select></div>
+          <div class="form-group"><label>Місце</label><input id="evVenue"></div>
+          <div class="form-group"><label>Дата</label><input id="evDate" type="datetime-local"></div>
+          <div class="form-group"><label>Опис</label><textarea id="evDesc" rows="3"></textarea></div>
+          <button class="btn btn-primary" onclick="addEvent()">Створити</button>
+        </div>
+        <div class="table-wrap"><table>
+          <tr><th>Назва</th><th>Тип</th><th>Дата</th><th></th></tr>
+          ${events.map(e => `
+            <tr>
+              <td>${e.title}</td><td>${e.event_type}</td><td>${formatDate(e.event_date)}</td>
+              <td>${!e.is_archived ? `<button class="btn btn-sm btn-danger" onclick="archiveEvent(${e.id})">Архів</button>` : 'архів'}</td>
+            </tr>
+          `).join('')}
+        </table></div>
+      `;
+
+      const { listings } = await api('/admin/listings?status=pending');
+      document.getElementById('moderation').innerHTML = listings.length ? `
+        <div class="table-wrap"><table>
+          <tr><th>Продавець</th><th>Подія</th><th>Місце</th><th>Ціна</th><th>Дії</th></tr>
+          ${listings.map(l => `
+            <tr>
+              <td>${l.full_name || l.email}</td>
+              <td>${l.event_title}</td>
+              <td>${l.sector_name} р.${l.row_num} м.${l.seat_num}</td>
+              <td>${formatPrice(l.price)}</td>
+              <td>
+                <button class="btn btn-sm btn-success" onclick="moderate(${l.id},'approved')">Схвалити</button>
+                <button class="btn btn-sm btn-danger" onclick="moderate(${l.id},'rejected')">Відхилити</button>
+              </td>
+            </tr>
+          `).join('')}
+        </table></div>
+      ` : '<p class="meta">Немає оголошень на модерації</p>';
+
+      const { notifications } = await api('/admin/notifications');
+      document.getElementById('notifications').innerHTML = `
+        <button class="btn btn-outline btn-sm" onclick="markAllRead()">Позначити всі прочитаними</button>
+        <div style="margin-top:16px">
+          ${notifications.length ? notifications.map(n => `
+            <div class="alert ${n.is_read ? '' : 'alert-info'}" style="margin-bottom:8px">
+              <strong>${n.type}</strong> — ${n.message}<br>
+              <small class="meta">${formatDate(n.created_at)}</small>
+            </div>
+          `).join('') : '<p class="meta">Сповіщень немає</p>'}
+        </div>`;
+    }
+
+    async function markAllRead() {
+      await api('/admin/notifications/read-all', { method: 'PATCH' });
+      toast('Готово');
+      load();
+    }
+
+    async function topup(id) {
+      const amount = await promptModal({
+        title: 'Нарахування балансу',
+        label: 'Сума (₴)',
+        placeholder: '1000',
+        inputType: 'number',
+        min: 1,
+        confirmText: 'Нарахувати',
+      });
+      if (!amount || Number(amount) <= 0) return;
+      try {
+        await api('/admin/users/' + id + '/topup', { method: 'POST', body: JSON.stringify({ amount: Number(amount) }) });
+        toast('Баланс нараховано', 'success');
+        load();
+      } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function block(id, blocked) {
+      await api('/admin/users/' + id + '/block', { method: 'PATCH', body: JSON.stringify({ blocked: !!blocked }) });
+      load();
+    }
+
+    async function setOrderStatus(id, status) {
+      await api('/admin/orders/' + id, { method: 'PATCH', body: JSON.stringify({ status }) });
+    }
+
+    async function addEvent() {
+      await api('/admin/events', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: document.getElementById('evTitle').value,
+          event_type: document.getElementById('evType').value,
+          venue: document.getElementById('evVenue').value,
+          event_date: document.getElementById('evDate').value,
+          description: document.getElementById('evDesc').value,
+        }),
+      });
+      load();
+    }
+
+    async function archiveEvent(id) {
+      await api('/admin/events/' + id + '/archive', { method: 'PATCH' });
+      load();
+    }
+
+    async function moderate(id, status) {
+      await api('/admin/listings/' + id, { method: 'PATCH', body: JSON.stringify({ status }) });
+      load();
+    }
+
+    load();
+  </script>
+</body>
+</html>
