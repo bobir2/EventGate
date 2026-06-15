@@ -16,8 +16,8 @@ router.post('/register', async (req, res) => {
 
     const hash = await bcrypt.hash(password, 10);
     const result = await run(
-      'INSERT INTO users (email, password_hash, full_name, phone, balance) VALUES (?,?,?,?,?)',
-      [email.toLowerCase(), hash, full_name || '', phone || '', 1000]
+      'INSERT INTO users (email, password_hash, full_name, phone) VALUES (?,?,?,?)',
+      [email.toLowerCase(), hash, full_name || '', phone || '']
     );
 
     const user = await getOne('SELECT id, email, role, full_name, balance FROM users WHERE email = ?', [email.toLowerCase()]);

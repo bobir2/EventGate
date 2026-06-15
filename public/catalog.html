@@ -12,25 +12,79 @@
   <section class="section">
     <div class="container">
       <h1 class="section-title">Каталог подій</h1>
-      <p class="meta" style="margin-bottom:18px">Пошук і фільтрація подій</p>
 
-      <div class="filters-row">
-        <input type="search" id="search" placeholder="Пошук...">
-        <select id="type"><option value="">Усі типи</option></select>
-        <select id="city"><option value="">Усі міста</option></select>
-        <select id="mood"><option value="">Усі настрої</option></select>
-        <input type="number" id="price_min" placeholder="Ціна від ₴" min="0">
-        <input type="number" id="price_max" placeholder="Ціна до ₴" min="0">
-        <input type="date" id="date_from">
-        <input type="date" id="date_to">
-        <select id="sort">
-          <option value="date_asc">Дата ↑</option>
-          <option value="date_desc">Дата ↓</option>
-          <option value="price_asc">Ціна ↑</option>
-          <option value="price_desc">Ціна ↓</option>
-          <option value="title">За назвою</option>
-        </select>
+      <div class="catalog-search">
+        <input type="search" id="search" placeholder="Назва, місто, майданчик, опис...">
+        <button type="button" class="btn btn-outline btn-sm" id="clearSearch" title="Очистити">×</button>
       </div>
+
+      <div class="quick-filters" id="quickFilters">
+        <span class="quick-label">Швидко:</span>
+        <button type="button" class="pill" data-qf="type" data-val="concert">Концерти</button>
+        <button type="button" class="pill" data-qf="type" data-val="standup">Стендап</button>
+        <button type="button" class="pill" data-qf="type" data-val="cinema">Кіно</button>
+        <button type="button" class="pill" data-qf="has_seats" data-val="1">Є місця</button>
+        <button type="button" class="pill" data-qf="date" data-val="week">Цього тижня</button>
+        <button type="button" class="pill" data-qf="date" data-val="month">Цього місяця</button>
+      </div>
+
+      <div class="filters-panel">
+        <div class="filters-panel-head">
+          <h3>Фільтри</h3>
+          <button type="button" class="btn btn-outline btn-sm" id="resetFilters">Скинути все</button>
+        </div>
+        <div class="filters-row">
+          <div class="filter-field">
+            <label>Тип</label>
+            <select id="type"><option value="">Усі типи</option></select>
+          </div>
+          <div class="filter-field">
+            <label>Місто</label>
+            <select id="city"><option value="">Усі міста</option></select>
+          </div>
+          <div class="filter-field">
+            <label>Майданчик</label>
+            <select id="venue"><option value="">Усі майданчики</option></select>
+          </div>
+          <div class="filter-field">
+            <label>Настрій</label>
+            <select id="mood"><option value="">Усі настрої</option></select>
+          </div>
+          <div class="filter-field">
+            <label>Ціна від, ₴</label>
+            <input type="number" id="price_min" min="0" placeholder="від">
+          </div>
+          <div class="filter-field">
+            <label>Ціна до, ₴</label>
+            <input type="number" id="price_max" min="0" placeholder="до">
+          </div>
+          <div class="filter-field">
+            <label>Дата від</label>
+            <input type="date" id="date_from">
+          </div>
+          <div class="filter-field">
+            <label>Дата до</label>
+            <input type="date" id="date_to">
+          </div>
+          <div class="filter-field">
+            <label>Сортування</label>
+            <select id="sort">
+              <option value="date_asc">Дата (найближчі)</option>
+              <option value="date_desc">Дата (пізніші)</option>
+              <option value="price_asc">Ціна ↑</option>
+              <option value="price_desc">Ціна ↓</option>
+              <option value="seats">Більше вільних місць</option>
+              <option value="title">За назвою</option>
+            </select>
+          </div>
+        </div>
+        <label class="filter-checkbox">
+          <input type="checkbox" id="has_seats">
+          <span>Тільки з вільними місцями</span>
+        </label>
+      </div>
+
+      <div id="activeFilters" class="active-filters hidden"></div>
 
       <div class="filters" style="margin-top:0">
         <div class="view-toggle">
@@ -50,15 +104,68 @@
   <script>
     let viewMode = 'grid';
     let debounce;
+    let filterMeta = {};
+
+    const FILTER_LABELS = {
+      search: 'Пошук', type: 'Тип', city: 'Місто', venue: 'Майданчик', mood: 'Настрій',
+      price_min: 'Ціна від', price_max: 'Ціна до', date_from: 'Від', date_to: 'До', has_seats: 'Є місця',
+    };
 
     async function loadFilters() {
-      const meta = await api('/events/meta/filters');
+      filterMeta = await api('/events/meta/filters');
       document.getElementById('type').innerHTML = '<option value="">Усі типи</option>' +
-        meta.types.map(t => `<option value="${t.id}">${t.label}</option>`).join('');
+        filterMeta.types.map(t => `<option value="${t.id}">${t.label}</option>`).join('');
       document.getElementById('city').innerHTML = '<option value="">Усі міста</option>' +
-        meta.cities.map(c => `<option value="${c}">${c}</option>`).join('');
+        filterMeta.cities.map(c => `<option value="${c}">${c}</option>`).join('');
+      document.getElementById('venue').innerHTML = '<option value="">Усі майданчики</option>' +
+        (filterMeta.venues || []).map(v => `<option value="${v}">${v}</option>`).join('');
       document.getElementById('mood').innerHTML = '<option value="">Усі настрої</option>' +
-        meta.moods.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+        filterMeta.moods.map(m => `<option value="${m.id}">${m.label}</option>`).join('');
+      if (filterMeta.price_min != null) {
+        document.getElementById('price_min').placeholder = `від ${filterMeta.price_min}`;
+        document.getElementById('price_max').placeholder = `до ${filterMeta.price_max}`;
+      }
+    }
+
+    function getFilterValues() {
+      const v = {
+        sort: document.getElementById('sort').value,
+        search: document.getElementById('search').value.trim(),
+        type: document.getElementById('type').value,
+        city: document.getElementById('city').value,
+        venue: document.getElementById('venue').value,
+        mood: document.getElementById('mood').value,
+        price_min: document.getElementById('price_min').value,
+        price_max: document.getElementById('price_max').value,
+        date_from: document.getElementById('date_from').value,
+        date_to: document.getElementById('date_to').value,
+        has_seats: document.getElementById('has_seats').checked ? '1' : '',
+      };
+      return v;
+    }
+
+    function renderActiveFilters() {
+      const v = getFilterValues();
+      const chips = [];
+      if (v.search) chips.push({ key: 'search', label: `"${v.search}"`, clear: () => { document.getElementById('search').value = ''; } });
+      if (v.type) chips.push({ key: 'type', label: filterMeta.types?.find(t => t.id === v.type)?.label || v.type, clear: () => { document.getElementById('type').value = ''; } });
+      if (v.city) chips.push({ key: 'city', label: v.city, clear: () => { document.getElementById('city').value = ''; } });
+      if (v.venue) chips.push({ key: 'venue', label: v.venue, clear: () => { document.getElementById('venue').value = ''; } });
+      if (v.mood) chips.push({ key: 'mood', label: filterMeta.moods?.find(m => m.id === v.mood)?.label || v.mood, clear: () => { document.getElementById('mood').value = ''; } });
+      if (v.price_min) chips.push({ key: 'price_min', label: `від ${v.price_min} ₴`, clear: () => { document.getElementById('price_min').value = ''; } });
+      if (v.price_max) chips.push({ key: 'price_max', label: `до ${v.price_max} ₴`, clear: () => { document.getElementById('price_max').value = ''; } });
+      if (v.date_from) chips.push({ key: 'date_from', label: `від ${v.date_from}`, clear: () => { document.getElementById('date_from').value = ''; } });
+      if (v.date_to) chips.push({ key: 'date_to', label: `до ${v.date_to}`, clear: () => { document.getElementById('date_to').value = ''; } });
+      if (v.has_seats) chips.push({ key: 'has_seats', label: 'Є місця', clear: () => { document.getElementById('has_seats').checked = false; } });
+
+      const el = document.getElementById('activeFilters');
+      if (!chips.length) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+      el.classList.remove('hidden');
+      el.innerHTML = '<span class="active-filters-label">Активні:</span>' +
+        chips.map((c, i) => `<button type="button" class="filter-chip" data-i="${i}">${c.label} ×</button>`).join('');
+      el.querySelectorAll('.filter-chip').forEach(btn => {
+        btn.onclick = () => { chips[Number(btn.dataset.i)].clear(); load(); };
+      });
     }
 
     function cardHtml(e) {
@@ -75,30 +182,30 @@
     }
 
     async function load() {
-      const params = new URLSearchParams({ sort: document.getElementById('sort').value, view: viewMode });
-      ['search','type','city','mood','price_min','price_max','date_from','date_to'].forEach(id => {
-        const v = document.getElementById(id).value;
-        if (v) params.set(id, v);
-      });
+      const v = getFilterValues();
+      const params = new URLSearchParams({ sort: v.sort, view: viewMode });
+      Object.entries(v).forEach(([k, val]) => { if (val && k !== 'sort') params.set(k, val); });
 
       const { events } = await api('/events?' + params);
       const container = document.getElementById('events');
       document.getElementById('count').textContent = `Знайдено: ${events.length}`;
+      renderActiveFilters();
 
       if (!events.length) {
         container.className = '';
-        container.innerHTML = '<p class="meta">Подій не знайдено. Спробуйте змінити фільтри.</p>';
+        container.innerHTML = '<div class="empty-results"><p>Подій не знайдено</p><p class="meta">Спробуйте змінити фільтри або скинути їх</p><button type="button" class="btn btn-outline btn-sm" onclick="resetAll()">Скинути фільтри</button></div>';
         return;
       }
 
       if (viewMode === 'table') {
         container.className = 'table-wrap';
         container.innerHTML = `<table class="events-table">
-          <tr><th>Назва</th><th>Тип</th><th>Місто</th><th>Дата</th><th>Ціна від</th><th>Вільно</th></tr>
+          <tr><th>Назва</th><th>Тип</th><th>Місто</th><th>Майданчик</th><th>Дата</th><th>Ціна від</th><th>Вільно</th></tr>
           ${events.map(e => `<tr>
             <td><a href="/event.html?id=${e.id}">${e.title}</a></td>
             <td>${typeBadge(e.event_type)}</td>
             <td>${e.city || '—'}</td>
+            <td>${e.venue || '—'}</td>
             <td>${formatDate(e.event_date)}</td>
             <td>${formatPrice(e.min_price || 0)}</td>
             <td>${e.free_seats || 0}</td>
@@ -110,6 +217,16 @@
       }
     }
 
+    function resetAll() {
+      document.getElementById('search').value = '';
+      ['type','city','venue','mood','price_min','price_max','date_from','date_to'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      document.getElementById('has_seats').checked = false;
+      document.getElementById('sort').value = 'date_asc';
+      load();
+    }
+
     function setView(mode, btn) {
       viewMode = mode;
       document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
@@ -117,13 +234,51 @@
       load();
     }
 
+    function applyQuickDate(range) {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const fmt = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+      document.getElementById('date_from').value = fmt(now);
+      if (range === 'week') {
+        const end = new Date(now);
+        end.setDate(end.getDate() + 7);
+        document.getElementById('date_to').value = fmt(end);
+      } else {
+        const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        document.getElementById('date_to').value = fmt(end);
+      }
+      load();
+    }
+
     document.getElementById('viewGrid').onclick = (e) => setView('grid', e.target);
     document.getElementById('viewList').onclick = (e) => setView('list', e.target);
     document.getElementById('viewTable').onclick = (e) => setView('table', e.target);
+    document.getElementById('resetFilters').onclick = resetAll;
+    document.getElementById('clearSearch').onclick = () => { document.getElementById('search').value = ''; load(); };
 
-    document.querySelectorAll('.filters-row input, .filters-row select').forEach(el => {
+    document.querySelectorAll('.filters-row input, .filters-row select, #has_seats').forEach(el => {
       el.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(load, 300); });
       el.addEventListener('change', load);
+    });
+    document.getElementById('search').addEventListener('input', () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(load, 350);
+    });
+
+    document.querySelectorAll('#quickFilters .pill').forEach(btn => {
+      btn.onclick = () => {
+        const qf = btn.dataset.qf;
+        const val = btn.dataset.val;
+        if (qf === 'type') {
+          document.getElementById('type').value = document.getElementById('type').value === val ? '' : val;
+        } else if (qf === 'has_seats') {
+          document.getElementById('has_seats').checked = !document.getElementById('has_seats').checked;
+        } else if (qf === 'date') {
+          applyQuickDate(val);
+          return;
+        }
+        load();
+      };
     });
 
     const urlParams = new URLSearchParams(location.search);
@@ -131,6 +286,7 @@
       if (urlParams.get('mood')) document.getElementById('mood').value = urlParams.get('mood');
       if (urlParams.get('type')) document.getElementById('type').value = urlParams.get('type');
       if (urlParams.get('city')) document.getElementById('city').value = urlParams.get('city');
+      if (urlParams.get('search')) document.getElementById('search').value = urlParams.get('search');
       load();
     });
   </script>

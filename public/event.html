@@ -15,7 +15,7 @@
   <script src="/js/api.js"></script>
   <script>
     const id = new URLSearchParams(location.search).get('id');
-    let selectedSeat = null;
+    const selectedSeats = new Map();
     let previewMode = false;
     let eventData = null;
     let seatsData = [];
@@ -27,6 +27,14 @@
       const res = await api('/events/' + id + '/seats');
       seatsData = res.seats;
       isFavorite = !!eventData.isFavorite;
+      selectedSeats.forEach((seat, sid) => {
+        const fresh = seatsData.find(s => String(s.id) === String(sid));
+        if (!fresh || fresh.status !== 'free') selectedSeats.delete(sid);
+      });
+    }
+
+    function totalSelected() {
+      return [...selectedSeats.values()].reduce((s, x) => s + Number(x.price), 0);
     }
 
     function render() {
@@ -36,6 +44,8 @@
         if (!bySector[s.sector_id]) bySector[s.sector_id] = { name: s.sector_name, price: s.price, id: s.sector_id, seats: [] };
         bySector[s.sector_id].seats.push(s);
       });
+
+      const count = selectedSeats.size;
 
       document.getElementById('content').innerHTML = `
         <div class="event-layout">
@@ -53,17 +63,24 @@
             </div>
           </div>
           <div>
-            <h3>Вибір місця</h3>
+            <h3>Вибір місць</h3>
+            <p class="meta" style="margin-bottom:10px">Клікніть на вільні місця — можна обрати кілька</p>
             <div class="pills" id="sectorPills"></div>
             <div class="stage">СЦЕНА / ЕКРАН</div>
             <div class="seat-map" id="seatMap"></div>
             <div class="seat-legend" style="display:flex;gap:14px;margin:10px 0;font-size:.78rem;color:var(--muted)">
-              <span>Вільне</span><span>Резерв</span><span>Зайняте</span>
+              <span><span class="legend-dot free"></span> Вільне</span>
+              <span><span class="legend-dot reserved"></span> Резерв</span>
+              <span><span class="legend-dot sold"></span> Зайняте</span>
+              <span><span class="legend-dot selected"></span> Обране</span>
             </div>
-            <div id="seatInfo" class="alert alert-info hidden"></div>
+            <div id="seatInfo" class="selected-seats-panel ${count ? '' : 'hidden'}"></div>
             <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-primary" id="addCartBtn" disabled>Додати в кошик</button>
-              <a href="/cart.html" class="btn btn-outline">Перейти в кошик</a>
+              <button class="btn btn-primary" id="addCartBtn" disabled>
+                ${count ? `Додати ${count} ${count === 1 ? 'місце' : count < 5 ? 'місця' : 'місць'} в кошик` : 'Додати в кошик'}
+              </button>
+              <button class="btn btn-outline" id="clearBtn" ${count ? '' : 'disabled'}>Скинути</button>
+              <a href="/cart.html" class="btn btn-outline">Кошик</a>
             </div>
           </div>
         </div>
@@ -82,19 +99,22 @@
         eventData.sectors.map(s => `<span class="pill ${activeSector==String(s.id)?'active':''}" data-s="${s.id}">${s.name}</span>`).join('');
 
       document.querySelectorAll('.pill').forEach(p => {
-        p.onclick = () => { activeSector = p.dataset.s; selectedSeat = null; render(); bindSeatMap(bySector); };
+        p.onclick = () => { activeSector = p.dataset.s; render(); };
       });
       document.querySelectorAll('[data-sector]').forEach(c => {
-        c.onclick = () => { activeSector = c.dataset.sector; selectedSeat = null; render(); };
+        c.onclick = () => { activeSector = c.dataset.sector; render(); };
       });
 
       document.getElementById('previewBtn').onclick = () => {
         previewMode = !previewMode;
-        selectedSeat = null;
+        if (previewMode) selectedSeats.clear();
         render();
       };
       document.getElementById('favBtn')?.addEventListener('click', toggleFavorite);
       document.getElementById('addCartBtn').onclick = addToCart;
+      document.getElementById('clearBtn').onclick = () => { selectedSeats.clear(); render(); };
+
+      updateSeatInfo();
       bindSeatMap(bySector);
     }
 
@@ -107,17 +127,18 @@
           ${groupByRow(sec.seats).map(([row, rowSeats]) => `
             <div class="seats-row">
               <span class="row-label">${row}</span>
-              ${rowSeats.map(s => `
-                <button class="seat ${s.status} ${selectedSeat?.id==s.id?(previewMode?'preview':'selected'):''}"
-                  data-id="${s.id}" data-row="${s.row_num}" data-seat="${s.seat_num}"
+              ${rowSeats.map(s => {
+                const sel = selectedSeats.has(String(s.id));
+                const cls = s.status !== 'free' ? s.status : (sel ? (previewMode ? 'preview' : 'selected') : 'free');
+                return `<button class="seat ${cls}" data-id="${s.id}" data-row="${s.row_num}" data-seat="${s.seat_num}"
                   data-sector="${sec.name}" data-price="${sec.price}"
-                  ${s.status !== 'free' ? 'disabled' : ''}>${s.seat_num}</button>
-              `).join('')}
+                  ${s.status !== 'free' ? 'disabled' : ''}>${s.seat_num}</button>`;
+              }).join('')}
             </div>`).join('')}
         </div>`).join('');
 
-      map.querySelectorAll('.seat.free').forEach(btn => {
-        btn.onclick = () => selectSeat(btn);
+      map.querySelectorAll('.seat.free, .seat.selected, .seat.preview').forEach(btn => {
+        if (!btn.disabled) btn.onclick = () => toggleSeat(btn);
       });
     }
 
@@ -127,27 +148,63 @@
       return Object.entries(rows).sort((a,b) => a[0]-b[0]);
     }
 
-    function selectSeat(btn) {
-      selectedSeat = { id: btn.dataset.id, row: btn.dataset.row, seat: btn.dataset.seat, sector: btn.dataset.sector, price: btn.dataset.price };
+    function toggleSeat(btn) {
+      const sid = btn.dataset.id;
+      if (previewMode) {
+        selectedSeats.clear();
+        selectedSeats.set(sid, {
+          id: sid, row: btn.dataset.row, seat: btn.dataset.seat,
+          sector: btn.dataset.sector, price: btn.dataset.price,
+        });
+      } else if (selectedSeats.has(sid)) {
+        selectedSeats.delete(sid);
+      } else {
+        selectedSeats.set(sid, {
+          id: sid, row: btn.dataset.row, seat: btn.dataset.seat,
+          sector: btn.dataset.sector, price: btn.dataset.price,
+        });
+      }
+      render();
+    }
+
+    function updateSeatInfo() {
       const info = document.getElementById('seatInfo');
+      if (!info) return;
+      const seats = [...selectedSeats.values()];
+      if (!seats.length) {
+        info.classList.add('hidden');
+        return;
+      }
       info.classList.remove('hidden');
-      info.innerHTML = previewMode
-        ? `Перегляд: ${selectedSeat.sector}, ряд ${selectedSeat.row}, місце ${selectedSeat.seat} — ${formatPrice(selectedSeat.price)}`
-        : `Обрано: ${selectedSeat.sector}, ряд ${selectedSeat.row}, місце ${selectedSeat.seat} — ${formatPrice(selectedSeat.price)}`;
-      document.getElementById('addCartBtn').disabled = previewMode;
-      document.querySelectorAll('.seat').forEach(s => s.classList.remove('selected','preview'));
-      btn.classList.add(previewMode ? 'preview' : 'selected');
+      if (previewMode) {
+        const s = seats[0];
+        info.innerHTML = `<p>Перегляд: ${s.sector}, ряд ${s.row}, місце ${s.seat} — ${formatPrice(s.price)}</p>`;
+        return;
+      }
+      info.innerHTML = `
+        <div class="selected-seats-header">
+          <strong>Обрано: ${seats.length}</strong>
+          <span class="price">${formatPrice(totalSelected())}</span>
+        </div>
+        <ul class="selected-seats-list">
+          ${seats.map(s => `<li>${s.sector}, ряд ${s.row}, м. ${s.seat} — ${formatPrice(s.price)}</li>`).join('')}
+        </ul>`;
+      const btn = document.getElementById('addCartBtn');
+      if (btn) btn.disabled = false;
     }
 
     async function addToCart() {
       if (!getToken()) { location.href = '/login.html?redirect=' + encodeURIComponent(location.href); return; }
-      if (!selectedSeat) return;
+      if (!selectedSeats.size || previewMode) return;
       try {
-        await api('/cart', { method: 'POST', body: JSON.stringify({ seat_id: Number(selectedSeat.id) }) });
-        toast('Додано в кошик', 'success');
+        const res = await api('/cart', {
+          method: 'POST',
+          body: JSON.stringify({ seat_ids: [...selectedSeats.keys()].map(Number) }),
+        });
+        toast(res.message || 'Додано в кошик', 'success');
+        selectedSeats.clear();
         updateCartBadge();
-        const res = await api('/events/' + id + '/seats');
-        seatsData = res.seats;
+        await fetchData();
         render();
       } catch (e) { toast(e.message, 'error'); }
     }

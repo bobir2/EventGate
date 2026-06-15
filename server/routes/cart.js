@@ -36,24 +36,48 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { seat_id } = req.body;
-    const seat = await getOne(
-      `SELECT st.*, s.price, e.title as event_title FROM seats st
-       JOIN sectors s ON s.id = st.sector_id JOIN events e ON e.id = s.event_id WHERE st.id = ?`,
-      [seat_id]
-    );
-    if (!seat) return res.status(404).json({ error: 'Місце не знайдено' });
-    if (seat.status !== 'free') return res.status(400).json({ error: 'Місце вже зайняте або в резерві' });
+    const ids = req.body.seat_ids || (req.body.seat_id ? [req.body.seat_id] : []);
+    if (!ids.length) return res.status(400).json({ error: 'Не вказано місця' });
 
-    const inOtherCart = await getOne(
-      'SELECT user_id FROM cart_items WHERE seat_id = ? AND user_id != ?',
-      [seat_id, req.user.id]
-    );
-    if (inOtherCart) return res.status(400).json({ error: 'Місце в кошику іншого користувача' });
+    const added = [];
+    const skipped = [];
 
-    await run('INSERT INTO cart_items (user_id, seat_id) VALUES (?,?) ON CONFLICT DO NOTHING', [req.user.id, seat_id]);
-    await run("UPDATE seats SET status = 'reserved' WHERE id = ? AND status = 'free'", [seat_id]);
-    res.status(201).json({ ok: true, message: 'Додано в кошик' });
+    for (const seat_id of ids) {
+      const seat = await getOne(
+        `SELECT st.*, s.price, e.title as event_title FROM seats st
+         JOIN sectors s ON s.id = st.sector_id JOIN events e ON e.id = s.event_id WHERE st.id = ?`,
+        [seat_id]
+      );
+      if (!seat) { skipped.push({ seat_id, reason: 'не знайдено' }); continue; }
+      if (seat.status !== 'free') { skipped.push({ seat_id, reason: 'зайняте' }); continue; }
+
+      const inOtherCart = await getOne(
+        'SELECT user_id FROM cart_items WHERE seat_id = ? AND user_id != ?',
+        [seat_id, req.user.id]
+      );
+      if (inOtherCart) { skipped.push({ seat_id, reason: 'в кошику іншого' }); continue; }
+
+      const inMyCart = await getOne(
+        'SELECT id FROM cart_items WHERE seat_id = ? AND user_id = ?',
+        [seat_id, req.user.id]
+      );
+      if (inMyCart) { skipped.push({ seat_id, reason: 'вже в кошику' }); continue; }
+
+      await run('INSERT INTO cart_items (user_id, seat_id) VALUES (?,?) ON CONFLICT DO NOTHING', [req.user.id, seat_id]);
+      await run("UPDATE seats SET status = 'reserved' WHERE id = ? AND status = 'free'", [seat_id]);
+      added.push(seat_id);
+    }
+
+    if (!added.length) {
+      return res.status(400).json({ error: 'Жодне місце не додано', skipped });
+    }
+
+    res.status(201).json({
+      ok: true,
+      message: added.length === 1 ? 'Додано в кошик' : `Додано ${added.length} місць`,
+      added,
+      skipped,
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

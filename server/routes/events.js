@@ -16,14 +16,25 @@ router.get('/meta/filters', async (req, res) => {
     const cities = await getAll(
       `SELECT DISTINCT city FROM events WHERE city IS NOT NULL AND city != '' AND NOT COALESCE(is_archived, false) ORDER BY city`
     );
+    const venues = await getAll(
+      `SELECT DISTINCT venue FROM events WHERE venue IS NOT NULL AND venue != '' AND NOT COALESCE(is_archived, false) ORDER BY venue`
+    );
+    const priceRange = await getOne(
+      `SELECT MIN(s.price) as min_price, MAX(s.price) as max_price
+       FROM sectors s JOIN events e ON e.id = s.event_id
+       WHERE NOT COALESCE(e.is_archived, false)`
+    );
     res.json({
       moods: Object.entries(MOODS).map(([id, label]) => ({ id, label })),
       cities: cities.map((c) => c.city),
+      venues: venues.map((v) => v.venue),
       types: [
         { id: 'concert', label: 'Концерти' },
         { id: 'standup', label: 'Стендап' },
         { id: 'cinema', label: 'Кіно' },
       ],
+      price_min: Number(priceRange?.min_price || 0),
+      price_max: Number(priceRange?.max_price || 5000),
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -50,7 +61,7 @@ router.get('/meta/mood/:mood', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
-    const { type, search, sort = 'date_asc', view, city, mood, price_min, price_max, date_from, date_to } = req.query;
+    const { type, search, sort = 'date_asc', view, city, mood, venue, price_min, price_max, date_from, date_to, has_seats } = req.query;
     let sql = `SELECT e.*, MIN(s.price) as min_price, MAX(s.price) as max_price,
                COUNT(DISTINCT st.id) as total_seats,
                SUM(CASE WHEN st.status = 'free' THEN 1 ELSE 0 END) as free_seats
@@ -62,24 +73,32 @@ router.get('/', async (req, res) => {
 
     if (type) { sql += ' AND e.event_type = ?'; params.push(type); }
     if (city) { sql += ' AND e.city = ?'; params.push(city); }
+    if (venue) { sql += ' AND e.venue = ?'; params.push(venue); }
     if (mood) { sql += ' AND e.mood = ?'; params.push(mood); }
     if (search) {
-      sql += ' AND (e.title LIKE ? OR e.venue LIKE ? OR e.city LIKE ? OR e.description LIKE ?)';
-      const q = `%${search}%`;
-      params.push(q, q, q, q);
+      const words = search.trim().split(/\s+/).filter(Boolean);
+      for (const word of words) {
+        sql += ' AND (e.title ILIKE ? OR e.venue ILIKE ? OR e.city ILIKE ? OR e.description ILIKE ?)';
+        const q = `%${word}%`;
+        params.push(q, q, q, q);
+      }
     }
     if (date_from) { sql += ' AND e.event_date >= ?'; params.push(date_from); }
     if (date_to) { sql += ' AND e.event_date <= ?'; params.push(date_to + 'T23:59:59'); }
 
     sql += ' GROUP BY e.id';
 
-    if (price_min) { sql += ' HAVING min_price >= ?'; params.push(Number(price_min)); }
-    if (price_max) { sql += price_min ? ' AND max_price <= ?' : ' HAVING max_price <= ?'; params.push(Number(price_max)); }
+    const having = [];
+    if (price_min) { having.push('MIN(s.price) >= ?'); params.push(Number(price_min)); }
+    if (price_max) { having.push('MAX(s.price) <= ?'); params.push(Number(price_max)); }
+    if (has_seats === '1') { having.push("SUM(CASE WHEN st.status = 'free' THEN 1 ELSE 0 END) > 0"); }
+    if (having.length) sql += ' HAVING ' + having.join(' AND ');
 
     if (sort === 'price_asc') sql += ' ORDER BY min_price ASC';
     else if (sort === 'price_desc') sql += ' ORDER BY min_price DESC';
     else if (sort === 'date_desc') sql += ' ORDER BY e.event_date DESC';
     else if (sort === 'title') sql += ' ORDER BY e.title ASC';
+    else if (sort === 'seats') sql += ' ORDER BY free_seats DESC';
     else sql += ' ORDER BY e.event_date ASC';
 
     const events = await getAll(sql, params);
